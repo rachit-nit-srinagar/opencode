@@ -1,6 +1,7 @@
 import { Effect } from "effect"
 import { cmd } from "./cmd"
-import { effectCmd } from "../effect-cmd"
+import { effectCmd, fail } from "../effect-cmd"
+import { isLensHardened } from "@opencode-ai/core/lens/hardening"
 
 export { extractResponseText, formatPromptTooLargeError, parseGitHubRemote } from "./github.shared"
 
@@ -9,6 +10,9 @@ export const GithubInstallCommand = effectCmd({
   describe: "install the GitHub agent",
   handler: () =>
     Effect.gen(function* () {
+      if (isLensHardened()) {
+        return yield* fail("GitHub agent install is disabled in Lens")
+      }
       const { githubInstall } = yield* Effect.promise(() => import("./github.handler"))
       return yield* githubInstall()
     }),
@@ -29,6 +33,9 @@ export const GithubRunCommand = effectCmd({
       }),
   handler: (args) =>
     Effect.gen(function* () {
+      if (isLensHardened()) {
+        return yield* fail("GitHub agent is disabled in Lens")
+      }
       const { githubRun } = yield* Effect.promise(() => import("./github.handler"))
       return yield* githubRun(args)
     }),

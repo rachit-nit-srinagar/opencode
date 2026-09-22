@@ -14,6 +14,7 @@ import { iife } from "../../../util/iife"
 import { fail } from "../../effect-cmd"
 import { InstanceRef } from "@/effect/instance-ref"
 import type { InstanceContext } from "@/project/instance-context"
+import { isLensHardened } from "@opencode-ai/core/lens/hardening"
 
 export const debugAgent = Effect.fn("Cli.debug.agent")(function* (args: {
   name: string
@@ -106,6 +107,9 @@ function parseToolParams(input?: string) {
     try {
       return JSON.parse(trimmed)
     } catch (jsonError) {
+      if (isLensHardened()) {
+        throw new Error(`Failed to parse --params as JSON: ${jsonError}`)
+      }
       try {
         return new Function(`return (${trimmed})`)()
       } catch (evalError) {

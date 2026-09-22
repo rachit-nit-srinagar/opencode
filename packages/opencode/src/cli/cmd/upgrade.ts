@@ -3,6 +3,7 @@ import { UI } from "../ui"
 import * as prompts from "@clack/prompts"
 import { Installation } from "../../installation"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
+import { isLensHardened } from "@opencode-ai/core/lens/hardening"
 
 export const UpgradeCommand = {
   command: "upgrade [target]",
@@ -21,6 +22,13 @@ export const UpgradeCommand = {
       })
   },
   handler: async (args: { target?: string; method?: string }) => {
+    if (isLensHardened()) {
+      UI.empty()
+      prompts.intro("Upgrade")
+      prompts.log.error("Auto-upgrade is disabled in Lens")
+      prompts.outro("Done")
+      return
+    }
     UI.empty()
     UI.println(UI.logo("  "))
     UI.empty()

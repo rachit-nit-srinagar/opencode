@@ -1,4 +1,5 @@
 import path from "path"
+import os from "os"
 import { Context, Effect, Layer, Stream } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { ChildProcess } from "effect/unstable/process"
@@ -8,6 +9,7 @@ import { makeGlobalNode } from "../effect/app-node"
 import { httpClient } from "../effect/app-node-platform"
 import { FSUtil } from "../fs-util"
 import { Global } from "../global"
+import { isLensHardened } from "../lens/hardening"
 import { which } from "../util/which"
 
 export namespace RipgrepBinary {
@@ -91,11 +93,25 @@ export namespace RipgrepBinary {
       return Service.of({
         filepath: yield* Effect.cached(
           Effect.gen(function* () {
-            const system = yield* Effect.sync(() => which(process.platform === "win32" ? "rg.exe" : "rg"))
+            const exe = process.platform === "win32" ? "rg.exe" : "rg"
+            const override = process.env.OPENCODE_RIPGREP_PATH
+            if (override && (yield* fs.isFile(override).pipe(Effect.orDie))) return override
+
+            const system = yield* Effect.sync(() => which(exe))
             if (system && (yield* fs.isFile(system).pipe(Effect.orDie))) return system
 
-            const target = path.join(Global.Path.bin, `rg${process.platform === "win32" ? ".exe" : ""}`)
+            const target = path.join(Global.Path.bin, exe)
             if (yield* fs.isFile(target).pipe(Effect.orDie)) return target
+
+            for (const candidate of bundledRipgrepPaths(exe)) {
+              if (yield* fs.isFile(candidate).pipe(Effect.orDie)) return candidate
+            }
+
+            if (isLensHardened()) {
+              throw new Error(
+                "ripgrep binary not found. Lens cannot download rg from GitHub; set OPENCODE_RIPGREP_PATH or install rg on PATH.",
+              )
+            }
 
             const platformKey = `${process.arch}-${process.platform}` as keyof typeof PLATFORM
             const config = PLATFORM[platformKey]
@@ -129,4 +145,26 @@ export namespace RipgrepBinary {
     layer: layer,
     deps: [FSUtil.node, httpClient, CrossSpawnSpawner.node],
   })
+}
+
+function bundledRipgrepPaths(exe: string): string[] {
+  const plat = process.platform === "win32" ? "win32" : process.platform === "darwin" ? "darwin" : "linux"
+  const arch = process.arch
+  // Only install-relative roots: cwd/VSCODE_CWD are workspace-controlled and could supply a planted rg.
+  const roots = [
+    path.resolve(import.meta.dirname, "../../../../../.."),
+    path.resolve(import.meta.dirname, "../../../../../../.."),
+  ]
+
+  const dirs: string[] = []
+  for (const root of roots) {
+    dirs.push(path.join(root, "node_modules", "@vscode", "ripgrep-universal", "bin", `${plat}-${arch}`, exe))
+    dirs.push(path.join(root, "node_modules", "@vscode", "ripgrep", "bin", exe))
+    dirs.push(path.join(root, "vscode", "node_modules", "@vscode", "ripgrep-universal", "bin", `${plat}-${arch}`, exe))
+    dirs.push(path.join(root, "vscode", "node_modules", "@vscode", "ripgrep", "bin", exe))
+  }
+  dirs.push(path.join("/opt/homebrew/bin", exe))
+  dirs.push(path.join("/usr/local/bin", exe))
+  dirs.push(path.join(os.homedir(), ".cargo", "bin", exe))
+  return [...new Set(dirs)]
 }

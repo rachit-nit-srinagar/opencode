@@ -6,6 +6,7 @@ import { AccountID, OrgID, PollExpired, type PollResult, type AccountError } fro
 import { effectCmd } from "../effect-cmd"
 import * as Prompt from "../effect/prompt"
 import open from "open"
+import { isLensHardened } from "@opencode-ai/core/lens/hardening"
 
 const openBrowser = (url: string) => Effect.promise(() => open(url).catch(() => undefined))
 
@@ -39,6 +40,12 @@ const isActiveOrgChoice = (
 ) => Option.isSome(active) && active.value.id === choice.accountID && active.value.active_org_id === choice.orgID
 
 const loginEffect = Effect.fn("login")(function* (url: string) {
+  if (isLensHardened()) {
+    yield* Prompt.intro("Log in")
+    yield* Prompt.log.error("OpenCode console login is disabled in Lens")
+    yield* Prompt.outro("Done")
+    return
+  }
   const service = yield* Account.Service
 
   yield* Prompt.intro("Log in")

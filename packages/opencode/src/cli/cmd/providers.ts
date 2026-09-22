@@ -17,6 +17,7 @@ import { Process } from "@/util/process"
 import { errorMessage } from "@/util/error"
 import { text } from "node:stream/consumers"
 import { Effect, Option } from "effect"
+import { isLensHardened } from "@opencode-ai/core/lens/hardening"
 
 type PluginAuth = NonNullable<Hooks["auth"]>
 
@@ -323,6 +324,11 @@ export const ProvidersLoginCommand = effectCmd({
     UI.empty()
     yield* Prompt.intro("Add credential")
     if (args.url) {
+      if (isLensHardened()) {
+        yield* Prompt.log.error("Well-known URL login is disabled in Lens")
+        yield* Prompt.outro("Done")
+        return
+      }
       const url = args.url.replace(/\/+$/, "")
       const wellknown = (yield* cliTry(`Failed to load auth provider metadata from ${url}: `, () =>
         fetch(`${url}/.well-known/opencode`).then((x) => x.json()),
