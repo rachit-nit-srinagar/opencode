@@ -23,6 +23,7 @@ import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/
 import { EffectFlock } from "@opencode-ai/core/util/effect-flock"
 import { containsPath, type InstanceContext } from "../project/instance-context"
 import { ConfigV1 } from "@opencode-ai/core/v1/config/config"
+import { isLensHardened } from "@opencode-ai/core/lens/hardening"
 import { RemoteAuthError } from "@opencode-ai/core/v1/config/error"
 import { ConfigPermissionV1 } from "@opencode-ai/core/v1/config/permission"
 import { ConfigPluginV1 } from "@opencode-ai/core/v1/config/plugin"
@@ -369,6 +370,10 @@ const layer = Layer.effect(
 
         for (const [key, value] of Object.entries(auth)) {
           if (value.type === "wellknown") {
+            if (isLensHardened()) {
+              yield* Effect.logWarning("skipped well-known remote config (Lens lockdown)", { key })
+              continue
+            }
             const url = key.replace(/\/+$/, "")
             authEnv[value.key] = value.token
             const wellknownURL = `${url}/.well-known/opencode`

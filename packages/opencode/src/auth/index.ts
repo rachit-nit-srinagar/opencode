@@ -4,6 +4,7 @@ import { Effect, Layer, Record, Result, Schema, Context } from "effect"
 import { NonNegativeInt } from "@opencode-ai/core/schema"
 import { Global } from "@opencode-ai/core/global"
 import { FSUtil } from "@opencode-ai/core/fs-util"
+import { isLensHardened } from "@opencode-ai/core/lens/hardening"
 
 export const OAUTH_DUMMY_KEY = "opencode-oauth-dummy-key"
 
@@ -71,6 +72,9 @@ const layer = Layer.effect(
     })
 
     const set = Effect.fn("Auth.set")(function* (key: string, info: Info) {
+      if (info.type === "wellknown" && isLensHardened()) {
+        return yield* Effect.fail(new AuthError({ message: "wellknown auth is disabled in Lens" }))
+      }
       const norm = key.replace(/\/+$/, "")
       const data = yield* all()
       if (norm !== key) delete data[key]

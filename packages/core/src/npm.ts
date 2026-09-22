@@ -121,6 +121,14 @@ const layer = Layer.effect(
       )
 
     const add = Effect.fn("Npm.add")(function* (pkg: string) {
+      const { isNpmInstallAllowed } = yield* Effect.promise(() => import("./lens/hardening"))
+      if (!isNpmInstallAllowed()) {
+        return yield* new InstallFailedError({
+          add: [pkg],
+          dir: directory(pkg),
+          cause: new Error("Lens blocks silent npm installs; set OPENCODE_ALLOW_NPM_INSTALL=1 for a user-initiated install"),
+        })
+      }
       const dir = directory(pkg)
       const name = (() => {
         try {
@@ -145,6 +153,14 @@ const layer = Layer.effect(
     }, Effect.scoped)
 
     const install: Interface["install"] = Effect.fn("Npm.install")(function* (dir, input) {
+      const { isNpmInstallAllowed } = yield* Effect.promise(() => import("./lens/hardening"))
+      if (!isNpmInstallAllowed() && (input?.add?.length ?? 0) > 0) {
+        return yield* new InstallFailedError({
+          add: (input?.add ?? []).map((pkg) => pkg.name),
+          dir,
+          cause: new Error("Lens blocks silent npm installs"),
+        })
+      }
       const canWrite = yield* afs.access(dir, { writable: true }).pipe(
         Effect.as(true),
         Effect.orElseSucceed(() => false),
