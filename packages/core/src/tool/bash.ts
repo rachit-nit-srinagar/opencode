@@ -14,6 +14,7 @@ import { PositiveInt } from "../schema"
 import { ToolRegistry } from "./registry"
 import { Tool } from "./tool"
 import { Tools } from "./tools"
+import { isLensHardened } from "../lens/hardening"
 
 export const name = "bash"
 export const DEFAULT_TIMEOUT_MS = 2 * 60 * 1_000
@@ -147,6 +148,12 @@ const layer = Layer.effectDiscard(
                 agent: context.agent,
                 source,
               })
+
+              if (isLensHardened()) {
+                const { checkBashCommand } = yield* Effect.promise(() => import("../lens/hardening"))
+                const blocked = checkBashCommand(input.command)
+                if (blocked) return yield* Effect.fail(new Error(blocked))
+              }
 
               if ((yield* fs.stat(target.canonical)).type !== "Directory")
                 return yield* Effect.fail(new Error(`Working directory is not a directory: ${target.canonical}`))

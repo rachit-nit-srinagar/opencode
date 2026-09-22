@@ -54,8 +54,10 @@ import { ModelV2 } from "@opencode-ai/core/model"
 import { MCP } from "@/mcp"
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { McpCatalog } from "@/mcp/catalog"
+import { isLensHardened } from "@opencode-ai/core/lens/hardening"
 
 export function webSearchEnabled(providerID: ProviderV2.ID, flags = { exa: false, parallel: false }) {
+  if (isLensHardened()) return true
   return (
     providerID === ProviderV2.ID.opencode ||
     providerID === ProviderV2.ID.make("opencode-go") ||
@@ -204,7 +206,10 @@ const layer = Layer.effect(
         }
 
         yield* config.get()
-        const questionEnabled = ["app", "cli", "desktop"].includes(flags.client) || flags.enableQuestionTool
+        const questionEnabled =
+          ["app", "cli", "desktop"].includes(flags.client) ||
+          flags.enableQuestionTool ||
+          isLensHardened()
 
         const tool = yield* Effect.all({
           invalid: Tool.init(invalid),

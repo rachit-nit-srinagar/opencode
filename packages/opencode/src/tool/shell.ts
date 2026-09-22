@@ -21,6 +21,7 @@ import { ChildProcess } from "effect/unstable/process"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { ShellPrompt, type Parameters } from "./shell/prompt"
 import { BashArity } from "@/permission/arity"
+import { isLensHardened } from "@opencode-ai/core/lens/hardening"
 
 export { Parameters } from "./shell/prompt"
 
@@ -614,6 +615,15 @@ export const ShellTool = Tool.define(
                 : instanceCtx.directory
               if (params.timeout !== undefined && params.timeout < 0) {
                 throw new Error(`Invalid timeout value: ${params.timeout}. Timeout must be a positive number.`)
+              }
+              if (isLensHardened()) {
+                const { checkBashCommand, checkWorkspacePath } = yield* Effect.promise(
+                  () => import("@opencode-ai/core/lens/hardening"),
+                )
+                const blocked = checkBashCommand(params.command)
+                if (blocked) throw new Error(blocked)
+                const outside = checkWorkspacePath(cwd, instanceCtx.directory)
+                if (outside) throw new Error(outside)
               }
               const timeout = params.timeout ?? defaultTimeoutMs
               const ps = Shell.ps(shell)

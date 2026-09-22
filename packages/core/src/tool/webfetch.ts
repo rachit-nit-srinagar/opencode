@@ -12,6 +12,7 @@ import { collectBoundedResponseBody } from "./http-body"
 import { ToolRegistry } from "./registry"
 import { Tool } from "./tool"
 import { Tools } from "./tools"
+import { isLensHardened } from "../lens/hardening"
 
 export const name = "webfetch"
 export const MAX_RESPONSE_BYTES = 5 * 1024 * 1024
@@ -134,6 +135,19 @@ const layer = Layer.effectDiscard(
                 try: () => assertHttpUrl(new URL(input.url)),
                 catch: (error) => error,
               })
+
+              if (isLensHardened()) {
+                const { assertPublicWebFetchUrl } = yield* Effect.promise(() => import("../lens/hardening"))
+                yield* Effect.try({
+                  try: () =>
+                    assertPublicWebFetchUrl(input.url, {
+                      tokenPort: Number(process.env.LENS_TOKEN_PORT) || undefined,
+                      proxyPort: Number(process.env.LENS_PROXY_PORT) || undefined,
+                      opencodePort: Number(process.env.LENS_OPENCODE_PORT) || undefined,
+                    }),
+                  catch: (error) => error,
+                })
+              }
 
               yield* permission.assert({
                 action: name,

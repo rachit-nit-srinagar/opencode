@@ -1,11 +1,12 @@
 import { Effect, Schema } from "effect"
-import { HttpClient } from "effect/unstable/http"
+import { HttpClient, HttpClientRequest } from "effect/unstable/http"
 import * as Tool from "./tool"
 import * as McpWebSearch from "./mcp-websearch"
 import DESCRIPTION from "./websearch.txt"
 import { checksum } from "@opencode-ai/core/util/encode"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
 import { RuntimeFlags } from "@/effect/runtime-flags"
+import { isLensHardened } from "@opencode-ai/core/lens/hardening"
 
 export const Parameters = Schema.Struct({
   query: Schema.String.annotate({ description: "Websearch query" }),
@@ -109,6 +110,24 @@ export const WebSearchTool = Tool.define(
       parameters: Parameters,
       execute: (params: Schema.Schema.Type<typeof Parameters>, ctx: Tool.Context) =>
         Effect.gen(function* () {
+          if (isLensHardened()) {
+            const { duckDuckGoSearchUrl, parseDuckDuckGoHtml } = yield* Effect.promise(
+              () => import("@opencode-ai/core/lens/hardening"),
+            )
+            const title = "DuckDuckGo Web Search"
+            yield* ctx.metadata({ title: `${title} "${params.query}"`, metadata: { provider: "duckduckgo" } })
+            const response = yield* http.execute(
+              HttpClientRequest.get(duckDuckGoSearchUrl(params.query)).pipe(
+                HttpClientRequest.setHeader("User-Agent", `opencode/${InstallationVersion}`),
+              ),
+            )
+            const html = yield* response.text
+            return {
+              output: parseDuckDuckGoHtml(html),
+              title: `${title}: ${params.query}`,
+              metadata: { provider: "duckduckgo" },
+            }
+          }
           const provider = selectWebSearchProvider(ctx.sessionID, {
             exa: flags.enableExa,
             parallel: flags.enableParallel,

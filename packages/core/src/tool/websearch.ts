@@ -14,6 +14,7 @@ import { Tools } from "./tools"
 import { collectBoundedResponseBody } from "./http-body"
 import { checksum } from "../util/encode"
 import { ToolRegistry } from "./registry"
+import { isLensHardened } from "../lens/hardening"
 
 export const name = "websearch"
 export const NO_RESULTS = "No search results found. Please try a different query."
@@ -204,8 +205,28 @@ const layer = Layer.effectDiscard(
           output: Output,
           toModelOutput: ({ output }) => [{ type: "text", text: output.text }],
           execute: (input, context) => {
-            const provider = selectProvider(context.sessionID, config, config.provider)
             return Effect.gen(function* () {
+              if (isLensHardened()) {
+                const { duckDuckGoSearchUrl, parseDuckDuckGoHtml } = yield* Effect.promise(
+                  () => import("../lens/hardening"),
+                )
+                yield* permission.assert({
+                  action: name,
+                  resources: [input.query],
+                  save: ["*"],
+                  metadata: { ...input, provider: "duckduckgo" },
+                  sessionID: context.sessionID,
+                  agent: context.agent,
+                  source: { type: "tool", messageID: context.assistantMessageID, callID: context.toolCallID },
+                })
+                const request = HttpClientRequest.get(duckDuckGoSearchUrl(input.query)).pipe(
+                  HttpClientRequest.setHeader("User-Agent", `opencode/${InstallationVersion}`),
+                )
+                const response = yield* HttpClient.filterStatusOk(http).execute(request)
+                const html = yield* response.text
+                return { provider: "exa" as const, text: parseDuckDuckGoHtml(html) }
+              }
+              const provider = selectProvider(context.sessionID, config, config.provider)
               yield* permission.assert({
                 action: name,
                 resources: [input.query],
