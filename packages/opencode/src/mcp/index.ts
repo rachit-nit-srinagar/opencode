@@ -34,6 +34,7 @@ import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { McpCatalog } from "./catalog"
 import { McpEvent } from "@opencode-ai/schema/mcp-event"
 import { McpBrowser } from "./browser"
+import { areLocalMcpServersAllowed } from "@opencode-ai/core/lens/hardening"
 
 const DEFAULT_TIMEOUT = 30_000
 const CLIENT_OPTIONS = {
@@ -341,6 +342,15 @@ const layer = Layer.effect(
       key: string,
       mcp: ConfigMCPV1.Info & { type: "local" },
     ) {
+      if (!areLocalMcpServersAllowed()) {
+        return {
+          client: undefined as MCPClient | undefined,
+          status: {
+            status: "failed",
+            error: "Local MCP servers are disabled in Lens; set OPENCODE_LENS_ALLOW_LOCAL_MCP=1 to allow them",
+          } as Status,
+        }
+      }
       const [cmd, ...args] = mcp.command
       const baseDir = yield* InstanceState.directory
       const cwd = mcp.cwd ? path.resolve(baseDir, mcp.cwd) : baseDir

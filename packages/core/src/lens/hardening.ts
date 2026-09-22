@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs"
 export const LENS_HARDENED_ENV = "OPENCODE_LENS_HARDENED"
 export const LENS_ALLOW_NPM_ENV = "OPENCODE_ALLOW_NPM_INSTALL"
 export const LENS_ALLOW_USER_PLUGINS_ENV = "OPENCODE_LENS_ALLOW_USER_PLUGINS"
+export const LENS_ALLOW_LOCAL_MCP_ENV = "OPENCODE_LENS_ALLOW_LOCAL_MCP"
 export const LENS_EGRESS_EXTRA_ENV = "OPENCODE_LENS_EGRESS_EXTRA"
 export const LENS_EGRESS_EXTRA_FILE_ENV = "OPENCODE_LENS_EGRESS_EXTRA_FILE"
 export const LENS_SEARCH_HOST = "html.duckduckgo.com"
@@ -49,6 +50,12 @@ export function isNpmInstallAllowed(): boolean {
 export function areUserPluginsAllowed(): boolean {
   if (!isLensHardened()) return true
   const value = process.env[LENS_ALLOW_USER_PLUGINS_ENV]?.toLowerCase()
+  return value === "1" || value === "true"
+}
+
+export function areLocalMcpServersAllowed(): boolean {
+  if (!isLensHardened()) return true
+  const value = process.env[LENS_ALLOW_LOCAL_MCP_ENV]?.toLowerCase()
   return value === "1" || value === "true"
 }
 

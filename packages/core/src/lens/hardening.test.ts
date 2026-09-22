@@ -3,17 +3,35 @@ import { mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
+  areLocalMcpServersAllowed,
   assertPublicWebFetchUrl,
   checkBashCommand,
   checkWorkspacePath,
   extraEgressHosts,
   isBlockedOpencodeHost,
   isHostAllowed,
+  LENS_ALLOW_LOCAL_MCP_ENV,
   LENS_EGRESS_EXTRA_FILE_ENV,
+  LENS_HARDENED_ENV,
   parseDuckDuckGoHtml,
 } from "./hardening"
 
 describe("Lens hardening", () => {
+  test("local MCP servers need explicit opt-in when hardened", () => {
+    const previous = { hardened: process.env[LENS_HARDENED_ENV], allow: process.env[LENS_ALLOW_LOCAL_MCP_ENV] }
+    delete process.env[LENS_ALLOW_LOCAL_MCP_ENV]
+    delete process.env[LENS_HARDENED_ENV]
+    expect(areLocalMcpServersAllowed()).toBe(true)
+    process.env[LENS_HARDENED_ENV] = "1"
+    expect(areLocalMcpServersAllowed()).toBe(false)
+    process.env[LENS_ALLOW_LOCAL_MCP_ENV] = "1"
+    expect(areLocalMcpServersAllowed()).toBe(true)
+    for (const [key, value] of [[LENS_HARDENED_ENV, previous.hardened], [LENS_ALLOW_LOCAL_MCP_ENV, previous.allow]] as const) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  })
+
   test("blocks opencode control-plane hosts", () => {
     expect(isBlockedOpencodeHost("models.opencode.ai")).toBe(true)
     expect(isBlockedOpencodeHost("app.opencode.ai")).toBe(true)
