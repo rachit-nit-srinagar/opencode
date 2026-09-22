@@ -1,5 +1,7 @@
 export * as Ripgrep from "./ripgrep"
 
+import fs from "node:fs/promises"
+import path from "node:path"
 import { Context, Effect, Fiber, Layer, Schema, Stream } from "effect"
 import { ChildProcess } from "effect/unstable/process"
 import { Entry, Match } from "@opencode-ai/schema/filesystem"
@@ -7,6 +9,7 @@ import { makeGlobalNode } from "./effect/app-node"
 import { AppProcess, collectStream, waitForAbort } from "./process"
 import { NonNegativeInt, PositiveInt, RelativePath } from "./schema"
 import { RipgrepBinary } from "./ripgrep/binary"
+import { Glob } from "./util/glob"
 
 /**
  * Small core-owned ripgrep execution adapter. It deliberately exposes raw
@@ -182,7 +185,11 @@ const layer = Layer.effect(
               }),
             ),
           ),
-          Effect.catchTag("Ripgrep.InvalidPatternError", (cause) => Effect.fail(failure(cause.message, cause))),
+          Effect.catch((cause) =>
+            cause instanceof InvalidPatternError
+              ? Effect.fail(failure(cause.message, cause))
+              : fallbackGlob(input).pipe(Effect.mapError((fallbackCause) => toRipgrepError(cause, fallbackCause))),
+          ),
         ),
       find: (input) =>
         run<Entry>({
@@ -213,7 +220,13 @@ const layer = Layer.effect(
           onItem: input.onEntry,
         }).pipe(
           Effect.map((result) => result.items),
-          Effect.catchTag("Ripgrep.InvalidPatternError", (cause) => Effect.fail(failure(cause.message, cause))),
+          Effect.catch((cause) =>
+            cause instanceof InvalidPatternError
+              ? Effect.fail(failure(cause.message, cause))
+              : fallbackGlob({ ...input, pattern: input.pattern === "*" ? "**/*" : input.pattern }).pipe(
+                  Effect.mapError((fallbackCause) => toRipgrepError(cause, fallbackCause)),
+                ),
+          ),
         ),
       grep: (input) =>
         run<RawMatchData>({
@@ -276,9 +289,108 @@ const layer = Layer.effect(
               })
             }),
           ),
+          Effect.catch((cause): Effect.Effect<readonly Match[], Error | InvalidPatternError> =>
+            cause instanceof InvalidPatternError
+              ? Effect.fail(cause)
+              : fallbackGrep(input).pipe(Effect.mapError((fallbackCause) => toRipgrepError(cause, fallbackCause))),
+          ),
         ),
     })
   }),
 )
+
+function toRipgrepError(cause: unknown, fallbackCause?: unknown) {
+  if (cause instanceof Error) return cause
+  return failure("ripgrep execution failed", fallbackCause ?? cause)
+}
+
+function ignoredSearchPath(relative: string): boolean {
+  return relative.replace(/\\/g, "/").split("/").some((part) => part === ".git" || part === "node_modules")
+}
+
+function fallbackGlob(input: GlobInput | FindInput): Effect.Effect<readonly Entry[], Error> {
+  const pattern = !input.pattern || input.pattern === "*" ? "**/*" : input.pattern
+  return Effect.tryPromise({
+    try: async () => {
+      const files = await Glob.scan(pattern, { cwd: input.cwd, dot: input.hidden ?? true })
+      return files
+        .map((file) => file.replace(/\\/g, "/").replace(/^\.\//, ""))
+        .filter((file) => file && !ignoredSearchPath(file))
+        .slice(0, input.limit)
+        .map((relative) =>
+          Entry.make({
+            path: RelativePath.make(relative),
+            type: "file",
+          }),
+        )
+    },
+    catch: (cause) => failure("File search fallback failed", cause),
+  })
+}
+
+function fallbackGrep(input: GrepInput): Effect.Effect<readonly Match[], Error | InvalidPatternError> {
+  let regex: RegExp
+  try {
+    regex = new RegExp(input.pattern)
+  } catch (cause) {
+    return Effect.fail(new InvalidPatternError({ pattern: input.pattern, message: String(cause) }))
+  }
+  const include = input.include
+    ? input.include.includes("/") || input.include.startsWith("**")
+      ? input.include
+      : `**/${input.include}`
+    : "**/*"
+  return Effect.tryPromise({
+    try: async () => {
+      const files = (await Glob.scan(include, { cwd: input.cwd, dot: true }))
+        .map((file) => file.replace(/\\/g, "/").replace(/^\.\//, ""))
+        .filter((file) => file && !ignoredSearchPath(file))
+        .slice(0, 400)
+      const matches: Match[] = []
+      for (const relative of files) {
+        if (matches.length >= input.limit) break
+        const absolute = path.join(input.cwd, relative)
+        let text: string
+        try {
+          const stat = await fs.stat(absolute)
+          if (!stat.isFile() || stat.size > 1_000_000) continue
+          const bytes = await fs.readFile(absolute)
+          if (bytes.includes(0)) continue
+          text = bytes.toString("utf8")
+        } catch {
+          continue
+        }
+        const lines = text.split("\n")
+        for (let index = 0; index < lines.length; index++) {
+          if (matches.length >= input.limit) break
+          regex.lastIndex = 0
+          const hit = regex.exec(lines[index] ?? "")
+          if (!hit) continue
+          const line = lines[index] ?? ""
+          matches.push(
+            Match.make({
+              entry: Entry.make({
+                path: RelativePath.make(relative),
+                type: "file",
+              }),
+              line: index + 1,
+              offset: 0,
+              text: line.length > 2_000 ? line.slice(0, 2_000).replace(/[\uD800-\uDBFF]$/, "") + "..." : line,
+              submatches: [
+                {
+                  text: hit[0] ?? "",
+                  start: hit.index,
+                  end: hit.index + (hit[0]?.length ?? 0),
+                },
+              ],
+            }),
+          )
+        }
+      }
+      return matches
+    },
+    catch: (cause) => failure("Content search fallback failed", cause),
+  })
+}
 
 export const node = makeGlobalNode({ service: Service, layer: layer, deps: [RipgrepBinary.node, AppProcess.node] })
