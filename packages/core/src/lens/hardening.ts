@@ -237,13 +237,24 @@ export function parseDuckDuckGoHtml(html: string): string {
   const linkRe = /<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi
   let match: RegExpExecArray | null
   while ((match = linkRe.exec(html)) && results.length < 8) {
-    const href = decodeHtml(match[1] ?? "")
+    const href = unwrapDuckDuckGoLink(decodeHtml(match[1] ?? ""))
     const title = decodeHtml(stripTags(match[2] ?? "")).trim()
     if (!title) continue
     results.push(`${results.length + 1}. ${title}\n   ${href}`)
   }
   if (!results.length) return "No search results found. Please try a different query."
   return results.join("\n")
+}
+
+// DuckDuckGo wraps results in a redirect (//duckduckgo.com/l/?uddg=<url>); show and fetch the real address.
+function unwrapDuckDuckGoLink(href: string): string {
+  try {
+    const url = new URL(href, "https://duckduckgo.com")
+    const target = url.pathname === "/l/" ? url.searchParams.get("uddg") : undefined
+    return target && /^https?:\/\//i.test(target) ? target : href
+  } catch {
+    return href
+  }
 }
 
 function stripTags(value: string): string {

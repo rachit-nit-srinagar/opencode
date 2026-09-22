@@ -82,4 +82,9 @@ describe("Lens hardening", () => {
     const html = `<a class="result__a" href="https://example.com">Example</a>`
     expect(parseDuckDuckGoHtml(html)).toContain("Example")
   })
+
+  test("unwraps DuckDuckGo redirect links to the real address", () => {
+    const html = `<a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fen.wikipedia.org%2Fwiki%2FMahatma_Gandhi&amp;rut=abc">Mahatma Gandhi - Wikipedia</a>`
+    expect(parseDuckDuckGoHtml(html)).toBe("1. Mahatma Gandhi - Wikipedia\n   https://en.wikipedia.org/wiki/Mahatma_Gandhi")
+  })
 })
