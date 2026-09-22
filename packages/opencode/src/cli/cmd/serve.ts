@@ -2,7 +2,7 @@ import { Effect } from "effect"
 import { effectCmd } from "../effect-cmd"
 import { withNetworkOptions, resolveNetworkOptions } from "../network"
 import { Flag } from "@opencode-ai/core/flag/flag"
-import { installLensFetchGuard, LENS_SEARCH_HOST, parseHostname } from "@opencode-ai/core/lens/hardening"
+import { installLensFetchGuard, LENS_SEARCH_HOST } from "@opencode-ai/core/lens/hardening"
 
 export const ServeCommand = effectCmd({
   command: "serve",
@@ -12,8 +12,8 @@ export const ServeCommand = effectCmd({
   // need for an ambient project InstanceContext at startup.
   instance: false,
   handler: Effect.fn("Cli.serve")(function* (args) {
-    const litellmHost = process.env.LITELLM_BASE_URL ? parseHostname(process.env.LITELLM_BASE_URL) : undefined
-    installLensFetchGuard(["127.0.0.1", "localhost", LENS_SEARCH_HOST, ...(litellmHost ? [litellmHost] : [])])
+    // Model traffic goes to the Lens app on loopback; other hosts come from OPENCODE_LENS_EGRESS_EXTRA[_FILE].
+    installLensFetchGuard(["127.0.0.1", "localhost", LENS_SEARCH_HOST])
     const { Server } = yield* Effect.promise(() => import("../../server/server"))
     if (!Flag.OPENCODE_SERVER_PASSWORD) {
       console.log("Warning: OPENCODE_SERVER_PASSWORD is not set; server is unsecured.")

@@ -11,13 +11,13 @@ import {
 } from "./hardening"
 
 const PROXY_HOST = "127.0.0.1"
-const LITELLM_HOST = "litellm.example.com"
-const ALWAYS = [PROXY_HOST, LITELLM_HOST, LENS_SEARCH_HOST]
+const APPROVED_HOST = "approved.example.com"
+const ALWAYS = [PROXY_HOST, APPROVED_HOST, LENS_SEARCH_HOST]
 
-/** URLs a typical agent turn would attempt: local proxy, LiteLLM, search, plus forbidden phone-home. */
+/** URLs a typical agent turn would attempt: local proxy, an approved host, search, plus forbidden phone-home. */
 const AGENT_TURN_URLS = [
   `http://${PROXY_HOST}:17385/openai/chat/completions`,
-  `https://${LITELLM_HOST}/v1/chat/completions`,
+  `https://${APPROVED_HOST}/v1/chat/completions`,
   `https://${LENS_SEARCH_HOST}/html/?q=lens`,
   "https://opencode.ai/zen",
   "https://models.opencode.ai/api.json",
@@ -30,7 +30,7 @@ describe("Lens network-monitor (agent turn egress)", () => {
   test("control-plane allowlist plus zero opencode phone-home", () => {
     const log = classifyAgentTurnConnections(AGENT_TURN_URLS, ALWAYS)
     expect(log.reached).toContain(PROXY_HOST)
-    expect(log.reached).toContain(LITELLM_HOST)
+    expect(log.reached).toContain(APPROVED_HOST)
     expect(log.reached).toContain(LENS_SEARCH_HOST)
     for (const host of BLOCKED_OPENCODE_HOSTS) {
       expect(log.reached.some((item) => item === host || item.endsWith(`.${host}`))).toBe(false)
@@ -54,11 +54,11 @@ describe("Lens network-monitor (agent turn egress)", () => {
       installLensFetchGuard(ALWAYS)
       await fetch(`http://${PROXY_HOST}:17385/openai/chat/completions`)
       await fetch(`https://${LENS_SEARCH_HOST}/html/?q=lens`)
-      await fetch(`https://${LITELLM_HOST}/v1/chat/completions`)
+      await fetch(`https://${APPROVED_HOST}/v1/chat/completions`)
       for (const host of ["opencode.ai", "models.opencode.ai", "app.opencode.ai", "opncd.ai"]) {
         await expect(fetch(`https://${host}/`)).rejects.toThrow(/Lens egress blocked/)
       }
-      expect(reached).toEqual([PROXY_HOST, LENS_SEARCH_HOST, LITELLM_HOST])
+      expect(reached).toEqual([PROXY_HOST, LENS_SEARCH_HOST, APPROVED_HOST])
       expect(reached.some((host) => isBlockedOpencodeHost(host))).toBe(false)
     } finally {
       globalThis.fetch = original
