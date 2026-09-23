@@ -31,11 +31,16 @@ export const directories = Effect.fn("ConfigPaths.directories")(function* (direc
           stop: worktree,
         })
       : []),
-    ...(yield* afs.up({
-      targets: [".opencode"],
-      start: Global.Path.home,
-      stop: Global.Path.home,
-    })),
+    // The home directory's own .opencode is the same kind of external, unmanaged config as a
+    // project's: skip it too when project config is disabled, or it would read (and try to npm
+    // install from) a directory Lens does not otherwise isolate the engine from.
+    ...(!Flag.OPENCODE_DISABLE_PROJECT_CONFIG
+      ? yield* afs.up({
+          targets: [".opencode"],
+          start: Global.Path.home,
+          stop: Global.Path.home,
+        })
+      : []),
     ...(Flag.OPENCODE_CONFIG_DIR ? [Flag.OPENCODE_CONFIG_DIR] : []),
   ])
 })
