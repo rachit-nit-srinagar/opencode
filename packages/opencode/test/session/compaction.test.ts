@@ -1264,6 +1264,69 @@ describe("session.compaction.process", () => {
     { timeout: 10_000 },
   )
 
+  // Lens: a summary that fails on a provider error must count as finished, or MessageV2.latest() keeps its
+  // compaction part as a pending task and every later prompt re-runs (and re-fails) the compaction.
+  for (const hardened of [true, false]) {
+    itCompaction.instance(
+      `a failed summary ${hardened ? "is marked finished (Lens hardened)" : "keeps upstream behaviour (not hardened)"}`,
+      () => {
+        const previous = process.env.OPENCODE_LENS_HARDENED
+        if (hardened) process.env.OPENCODE_LENS_HARDENED = "1"
+        else delete process.env.OPENCODE_LENS_HARDENED
+        const stub = llm()
+        stub.push(
+          Stream.fromAsyncIterable(
+            {
+              async *[Symbol.asyncIterator]() {
+                yield LLMEvent.stepStart({ index: 0 })
+                throw new APICallError({
+                  message: "bad request",
+                  url: "https://example.com/v1/chat/completions",
+                  requestBodyValues: {},
+                  statusCode: 400,
+                  responseBody: '{"error":"bad request"}',
+                  isRetryable: false,
+                })
+              },
+            },
+            (err) => err,
+          ),
+        )
+        return Effect.gen(function* () {
+          const ssn = yield* SessionNs.Service
+          const session = yield* ssn.create({})
+          const msg = yield* createUserMessage(session.id, "hello")
+          const msgs = yield* ssn.messages({ sessionID: session.id })
+          const result = yield* SessionCompaction.use.process({
+            parentID: msg.id,
+            messages: msgs,
+            sessionID: session.id,
+            auto: false,
+          })
+          const after = yield* ssn.messages({ sessionID: session.id })
+          const summary = after.find((item) => item.info.role === "assistant" && item.info.summary)
+          expect(result).toBe("stop")
+          expect(summary?.info.role).toBe("assistant")
+          if (summary?.info.role === "assistant") {
+            expect(summary.info.error).toBeDefined()
+            expect(summary.info.finish).toBe(hardened ? "error" : undefined)
+            expect(MessageV2.latest(after).finished?.id === summary.info.id).toBe(hardened)
+          }
+        }).pipe(
+          withCompaction({ llm: stub.llmLayer }),
+          Effect.ensuring(
+            Effect.sync(() => {
+              if (previous === undefined) delete process.env.OPENCODE_LENS_HARDENED
+              else process.env.OPENCODE_LENS_HARDENED = previous
+            }),
+          ),
+        )
+      },
+      { git: true },
+      { timeout: 10_000 },
+    )
+  }
+
   itCompaction.instance(
     "does not leave a summary assistant when aborted before processor setup",
     () =>

@@ -21,6 +21,7 @@ import { EventV2Bridge } from "@/event-v2-bridge"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { buildPrompt } from "@opencode-ai/core/session/compaction"
+import { isLensHardened } from "@opencode-ai/core/lens/hardening"
 import { SessionCompactionEvent } from "@opencode-ai/schema/session-compaction-event"
 
 export const Event = SessionCompactionEvent
@@ -453,6 +454,15 @@ const layer = Layer.effect(
             ? "Conversation history too large to compact - exceeds model context limit"
             : "Session too large to compact - context exceeds model limit even after stripping media",
         }).toObject()
+        processor.message.finish = "error"
+        yield* session.updateMessage(processor.message)
+        return "stop"
+      }
+
+      // Lens: a summary that failed (provider error or Stop) is left without `finish`, so MessageV2.latest()
+      // still sees its compaction part as a pending task and every later prompt in the chat re-runs the
+      // compaction first, failing again. Mark it finished so the chat moves on and the user can retry.
+      if (isLensHardened() && processor.message.error && !processor.message.finish) {
         processor.message.finish = "error"
         yield* session.updateMessage(processor.message)
         return "stop"

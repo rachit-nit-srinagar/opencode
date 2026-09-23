@@ -9,6 +9,7 @@ import { MessageV2 } from "./message-v2"
 import { SessionID, MessageID, PartID } from "./schema"
 import { SessionRunState } from "./run-state"
 import { SessionSummary } from "./summary"
+import { isLensHardened } from "@opencode-ai/core/lens/hardening"
 
 export const RevertInput = Schema.Struct({
   sessionID: SessionID,
@@ -34,6 +35,28 @@ const layer = Layer.effect(
     const events = yield* EventV2Bridge.Service
     const summary = yield* SessionSummary.Service
     const state = yield* SessionRunState.Service
+
+    // Undoing a rewind restores the snapshot taken when the rewind happened. Upstream restores the whole
+    // tree, which also overwrites files the user changed while the chat was rewound. Lens restores only
+    // the files the rewind itself touched: the ones in the rewound turns' patches.
+    const restore = Effect.fn("SessionRevert.restore")(function* (
+      sessionID: SessionID,
+      revert: NonNullable<Session.Info["revert"]>,
+    ) {
+      if (!revert.snapshot) return
+      if (!isLensHardened()) return yield* snap.restore(revert.snapshot)
+      const all = yield* sessions.messages({ sessionID }).pipe(Effect.orDie)
+      const index = all.findIndex((msg) => msg.info.id === revert.messageID)
+      if (index < 0) return
+      const touched: Snapshot.Patch[] = []
+      for (const msg of all.slice(index)) {
+        const from = revert.partID && msg.info.id === revert.messageID ? msg.parts.findIndex((part) => part.id === revert.partID) : 0
+        for (const part of msg.parts.slice(Math.max(0, from))) {
+          if (part.type === "patch") touched.push({ hash: revert.snapshot, files: part.files })
+        }
+      }
+      yield* snap.revert(touched)
+    })
 
     const revert = Effect.fn("SessionRevert.revert")(function* (input: RevertInput) {
       yield* state.assertNotBusy(input.sessionID)
@@ -68,7 +91,7 @@ const layer = Layer.effect(
       if (!rev) return session
 
       rev.snapshot = session.revert?.snapshot ?? (yield* snap.track())
-      if (session.revert?.snapshot) yield* snap.restore(session.revert.snapshot)
+      if (session.revert?.snapshot) yield* restore(input.sessionID, session.revert)
       yield* snap.revert(patches)
       if (rev.snapshot) rev.diff = yield* snap.diff(rev.snapshot)
       const index = all.findIndex((msg) => msg.info.id === rev.messageID)
@@ -93,7 +116,7 @@ const layer = Layer.effect(
       yield* state.assertNotBusy(input.sessionID)
       const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
       if (!session.revert) return session
-      if (session.revert.snapshot) yield* snap.restore(session.revert.snapshot)
+      if (session.revert.snapshot) yield* restore(input.sessionID, session.revert)
       yield* sessions.clearRevert(input.sessionID)
       return yield* sessions.get(input.sessionID).pipe(Effect.orDie)
     })
